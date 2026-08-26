@@ -1,0 +1,36 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ndc_cache/
+.venv/
+build/
+dist/
+data/
+outputs/
+*.gndc
+*.tif
+*.tiff
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.gpkg
+*.npz
+*.npy
+*.csv
+*.log
+.idea/
+.vscode/
+
+# Keep the distributable Vegetation Fire example while ignoring other local data.
+!data/
+data/*
+!data/Vegetation Fire/
+data/Vegetation Fire/*
+!data/Vegetation Fire/DATA_MANIFEST.csv
+!data/Vegetation Fire/train/
+!data/Vegetation Fire/train/*.tif
+!data/Vegetation Fire/target/
+!data/Vegetation Fire/target/*.tif

@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sinc-remote-sensing"
+version = "0.1.0"
+description = "Spatiotemporal Implicit Neural Continuous monitoring for Sentinel-2 time series"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "torch>=2.2",
+  "numpy>=1.24,<3",
+  "scipy>=1.10",
+  "rasterio>=1.3",
+  "PyYAML>=6.0",
+  "tqdm>=4.66",
+  "matplotlib>=3.7",
+  "zstandard>=0.22",
+]
+
+[project.optional-dependencies]
+vector = ["geopandas>=0.14", "shapely>=2.0", "fiona>=1.9"]
+test = ["pytest>=8.0"]
+
+[project.scripts]
+sinc-train = "sinc.train:main"
+sinc-calibrate = "sinc.calibrate:main"
+sinc-detect = "sinc.detect:main"
+sinc-check = "sinc.preflight:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["sinc*", "common*", "ground*", "onboard*", "experiments*"]
+
+[tool.setuptools.package-data]
+ground = ["config/*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,24 @@
+"""
+常量定义 - 在轨端与地面端共享
+"""
+
+# CFAR检测参数
+CFAR_SCALES = [(11, 3), (25, 9), (51, 21)]
+BASE_MMU = 6
+EROSION_RADIUS = 1
+
+# 推理参数
+DEFAULT_CHUNK_SIZE = 2 ** 18
+DEFAULT_BATCH_SIZE = 4096
+
+# 异常检测参数
+DEFAULT_CHI2_OFFSET = 0.005
+
+# 输出参数
+OUTPUT_DTYPE = 'float32'
+ALERT_VERSION = "1.0"
+
+# 影像预处理参数
+DEFAULT_SCALE_FACTOR = 0.0001
+DEFAULT_VALID_RANGE = (0, 1.2)
+VALID_THRESHOLD = 0.001

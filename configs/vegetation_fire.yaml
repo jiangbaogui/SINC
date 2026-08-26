@@ -1,0 +1,45 @@
+project:
+  name: "SINC_Vegetation_Fire_Example"
+  description: "Full pre-event Vegetation Fire baseline for anomaly detection"
+
+paths:
+  input_folder: "data/Vegetation Fire/train"
+  output_model: "outputs/vegetation_fire/sinc.gndc"
+
+data:
+  dataset_mode: "standard"
+  n_bands: 7
+  global_start_date: "2018-07-14"
+  global_end_date: "2021-07-08"
+  temporal_buffer_days: 0
+  input_quality_screened: true
+  quality_mask_description: "Cloud, cloud-shadow, snow, and invalid observations were removed before export."
+  data_scale: 0.0001
+  input_valid_range: [0.0, 1.2]
+  input_p99_removal: false
+  temporal_bin_days: null
+
+train:
+  epochs: 2000
+  lr: 0.01
+  use_log: false
+  train_dtype: "float16"
+  train_loss_type: "NLL"
+  n_harmonics: 3
+  lambda_reg: 0.0005
+  lambda_dynamic_magnitude: 0.0005
+  valid_threshold: 0.001
+  xy_hash_size: 16
+  n_levels: 12
+  per_level_scale: 1.3455
+  base_resolution: 16
+  features_per_level: 2
+  decoder_hidden: 128
+  n_hidden_layers: 2
+  ablation_mode: "full"
+  random_seed: 42
+
+output:
+  quant_mode: "float16"
+  save_residuals: false
+  residual_dtype: "float16"

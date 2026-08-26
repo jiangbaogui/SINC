@@ -1,0 +1,29 @@
+{
+  "canonical_root": ".",
+  "file_count": 23,
+  "files": {
+    "common/constants.py": "99246927dfb6b0a052623610b2c469f13317193766d6b4bbc607f5155f52195f",
+    "common/scene_inference.py": "f8babc5503334082651144e08a9f2c371bb45ede0a4cfb45480c2469ce523b64",
+    "experiments/__init__.py": "65cc41594b6f6c21f8d9c47738027a7c414a4d379cd4d235ec1320679c1daf64",
+    "experiments/adaptive_detection/__init__.py": "208144acbd85051af5f71069b53350fb2629b09fe5dc2c35c912c4a42c562b86",
+    "experiments/adaptive_detection/empirical_null_calibration.py": "a9b6395224c383d93011b1f06270a38bf54007d6282020bb85365ea5b5f16a2f",
+    "ground/__init__.py": "8c6512bd4c4d3fff55bfc1def4b9a063864bcaea738064f3fdc90296dd0065d3",
+    "ground/config/sensor_s2.yaml": "99254e0696ec7303b2c7c090fbdc655a3b2f8fcd51c811cacc4667001cb23345",
+    "ground/core/GNDCProfile.py": "eb4bee9d9a00b2c60c1b689e9ecb06dff26f27e7d54138850403e650a2947b5d",
+    "ground/core/NDCCCDCNetwork.py": "682881cc8b8c9a20c8c8d6247c1e506e1fcfb297b9229fddeb5fc8a304c67c6e",
+    "ground/core/NDCCompressor.py": "dbe9ebac3da1f3ceca1cf97df3540c560a421e49e0cf7081b1daff13a989fd89",
+    "ground/core/NDCConfig.py": "9daf9ea886e409c546ecab70c7523d2bcc5486b577a751e3f5e0e200e84c6ee9",
+    "ground/core/NDCDatasetLoader.py": "757a4b496355298065556feff526e3f0cb433ce877e400bd6d40d9e2f7fab4fe",
+    "ground/core/NDCReader.py": "799760fe18bbcf731c45f4f906d5f314a11f1dd3211fd480f8a31b1e40cc4408",
+    "ground/core/NDCUtils.py": "8b65a9fea6de668f2ddf1d1cace59c25a27a6491745be214f493b0c8f467c020",
+    "ground/tools/trainer.py": "68760e25a8fd288348d39324b9ccbc78aad38c8b179c86820a908ebb9fde2a70",
+    "onboard/__init__.py": "6c55f9c9c564740d54036ff724fd380139e4920692017df84152b9b4f4e5c5d7",
+    "onboard/core/anomaly_detector.py": "0a2b1e333e56f845c8a45e92d620c4afc3a528f81c080c8fb2712d44c9c8965d",
+    "onboard/core/empirical_null.py": "dfbebfb99b910e82defd87998dbb1293cb226d92ce7f62c2525d828d1c420e92",
+    "onboard/core/onboard_inference.py": "e436d1affeb6eb756b0ff319bf587d108934013b5bcf49992201eaf4518f1b73",
+    "onboard/core/result_exporter.py": "2d99059d6262838195c3b101a85c467a62f1a9a9c61eb930ac7a78093ee1253b",
+    "onboard/core/terminal_state.py": "74caf8455cf8f23b421252495472f3ada3cb61df26a1ccbdc522831e9dd52281",
+    "onboard/main.py": "4d53a56edc63848b943fe69ddc317491078ac9cd87306cb698e8ccd883ade565",
+    "onboard/preprocessing/image_preprocessor.py": "869867c9dc2014f17d5ca4d0161cfc26ade53788c319065ae728cc3527111249"
+  }
+}
