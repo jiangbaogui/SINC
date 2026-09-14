@@ -56,7 +56,10 @@ def main() -> None:
     rows = []
     for image_path in images:
         observation, metadata = preprocessor.load_tif(
-            str(image_path), expected_bands=inference.meta["n_bands"]
+            str(image_path),
+            expected_bands=inference.meta["n_bands"],
+            source_band_indices=inference.meta.get("source_band_indices"),
+            source_band_names=inference.meta.get("source_band_names"),
         )
         if metadata["date"] is None:
             raise ValueError(f"No acquisition date found in {image_path.name}")

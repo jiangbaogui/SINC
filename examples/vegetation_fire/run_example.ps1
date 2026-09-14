@@ -5,7 +5,7 @@ param(
     [ValidateSet("cuda", "cuda:0")]
     [string]$Device = "cuda",
     [ValidateRange(0.0001, 0.1)]
-    [double]$Alpha = 0.01
+    [double]$Alpha = 0.005
 )
 
 $ErrorActionPreference = "Stop"

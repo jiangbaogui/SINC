@@ -58,6 +58,8 @@ class OnboardAnomalyDetector:
         self.inference = OnboardInference(model_path, device=device)
         self.inference.require_current_model_contract(expected_ablation_mode="full")
         self.meta = self.inference.get_meta()
+        self.source_band_indices = self.meta.get("source_band_indices")
+        self.source_band_names = self.meta.get("source_band_names")
         threshold_profile = (
             threshold_profile or self.inference.get_empirical_null_profile()
         )
@@ -96,7 +98,12 @@ class OnboardAnomalyDetector:
         start_time = time.time()
         
         preprocessor = ImagePreprocessor()
-        obs, img_meta = preprocessor.load_tif(tif_path, expected_bands=self.meta['n_bands'])
+        obs, img_meta = preprocessor.load_tif(
+            tif_path,
+            expected_bands=self.meta['n_bands'],
+            source_band_indices=self.source_band_indices,
+            source_band_names=self.source_band_names,
+        )
         
         date_dt = img_meta['date']
         if date_dt is None:

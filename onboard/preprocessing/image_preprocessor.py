@@ -2,22 +2,35 @@
 影像预处理模块 - 读取和预处理遥感影像
 """
 import os
+import warnings
 import numpy as np
 import rasterio
 from pathlib import Path
 
 try:
-    from ground.core.NDCUtils import extract_date_from_filename
+    from ground.core.NDCUtils import (
+        extract_date_from_filename,
+        group_dated_paths_by_day,
+    )
     from common.constants import (
-        DEFAULT_SCALE_FACTOR, DEFAULT_VALID_RANGE, VALID_THRESHOLD
+        DAILY_OBSERVATION_PROTOCOL,
+        DEFAULT_SCALE_FACTOR,
+        DEFAULT_VALID_RANGE,
+        VALID_THRESHOLD,
     )
 except ImportError:
     from pathlib import Path
     import sys
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-    from ground.core.NDCUtils import extract_date_from_filename
+    from ground.core.NDCUtils import (
+        extract_date_from_filename,
+        group_dated_paths_by_day,
+    )
     from common.constants import (
-        DEFAULT_SCALE_FACTOR, DEFAULT_VALID_RANGE, VALID_THRESHOLD
+        DAILY_OBSERVATION_PROTOCOL,
+        DEFAULT_SCALE_FACTOR,
+        DEFAULT_VALID_RANGE,
+        VALID_THRESHOLD,
     )
 
 
@@ -38,7 +51,13 @@ class ImagePreprocessor:
         self.valid_range = valid_range
         self.valid_threshold = valid_threshold
         
-    def load_tif(self, tif_path, expected_bands=None):
+    def load_tif(
+        self,
+        tif_path,
+        expected_bands=None,
+        source_band_indices=None,
+        source_band_names=None,
+    ):
         """
         加载并预处理TIF文件
         
@@ -52,12 +71,45 @@ class ImagePreprocessor:
         """
         with rasterio.open(tif_path) as src:
             H, W = src.height, src.width
-            C = src.count
-            
-            if expected_bands and C != expected_bands:
-                print(f"[Warning] Expected {expected_bands} bands, got {C}. Using all bands.")
-            
-            raw_data = src.read().transpose(1, 2, 0).astype(np.float32)
+            source_count = src.count
+            selected_indices = (
+                list(range(1, source_count + 1))
+                if source_band_indices is None
+                else [int(value) for value in source_band_indices]
+            )
+            if expected_bands is not None and len(selected_indices) != expected_bands:
+                if source_band_indices is None:
+                    raise ValueError(
+                        f"Raster contains {source_count} bands but the model expects "
+                        f"{expected_bands}; provide an explicit source_band_indices mapping"
+                    )
+                raise ValueError(
+                    f"Expected {expected_bands} selected bands, got "
+                    f"{len(selected_indices)}"
+                )
+            if not selected_indices or min(selected_indices) < 1:
+                raise ValueError(
+                    "source_band_indices must be one-based positive integers"
+                )
+            if max(selected_indices) > source_count:
+                raise ValueError(
+                    f"Requested source band {max(selected_indices)} but {tif_path} "
+                    f"contains only {source_count} bands"
+                )
+            if source_band_names and any(src.descriptions):
+                actual_names = [src.descriptions[index - 1] for index in selected_indices]
+                if actual_names != list(source_band_names):
+                    raise ValueError(
+                        f"Configured source bands {list(source_band_names)} do not "
+                        f"match GeoTIFF descriptions {actual_names} in {tif_path}"
+                    )
+
+            raw_data = (
+                src.read(indexes=selected_indices)
+                .transpose(1, 2, 0)
+                .astype(np.float32)
+            )
+            C = raw_data.shape[-1]
             
             transform = src.transform
             crs = src.crs.to_wkt() if src.crs else None
@@ -69,10 +121,14 @@ class ImagePreprocessor:
         
         obs = raw_data.copy()
         
-        if np.max(obs) > 10:
+        finite_values = obs[np.isfinite(obs)]
+        if finite_values.size and float(np.max(finite_values)) > 10.0:
             obs *= self.scale_factor
         
         obs = np.nan_to_num(obs, nan=0.0, posinf=0.0, neginf=0.0)
+
+        if self.valid_threshold is not None:
+            obs[obs <= self.valid_threshold] = 0.0
         
         if self.valid_range:
             obs[(obs < self.valid_range[0]) | (obs > self.valid_range[1])] = 0.0
@@ -86,12 +142,24 @@ class ImagePreprocessor:
             'crs': crs,
             'width': W,
             'height': H,
-            'bands': C
+            'bands': C,
+            'source_bands': source_count,
+            'source_band_indices': selected_indices,
+            'source_band_names': list(source_band_names or []),
         }
         
         return obs, meta
     
-    def load_tif_sequence(self, folder_path, date_start=None, date_end=None, pattern="*.tif"):
+    def load_tif_sequence(
+        self,
+        folder_path,
+        date_start=None,
+        date_end=None,
+        pattern="*.tif",
+        expected_bands=None,
+        source_band_indices=None,
+        source_band_names=None,
+    ):
         """
         加载文件夹中的TIF序列
         
@@ -105,12 +173,11 @@ class ImagePreprocessor:
             images: 影像列表 [(obs, meta), ...]
         """
         folder = Path(folder_path)
-        tif_files = sorted(folder.glob(pattern))
+        dated_groups = group_dated_paths_by_day(folder.glob(pattern))
         
         images = []
         
-        for tif_path in tif_files:
-            date_dt = extract_date_from_filename(tif_path.name)
+        for date_dt, source_paths in dated_groups:
             
             if date_start and date_dt and date_dt < date_start:
                 continue
@@ -118,10 +185,46 @@ class ImagePreprocessor:
                 continue
             
             try:
-                obs, meta = self.load_tif(str(tif_path))
+                daily_arrays = []
+                meta = None
+                for tif_path in source_paths:
+                    current, current_meta = self.load_tif(
+                        str(tif_path),
+                        expected_bands=expected_bands,
+                        source_band_indices=source_band_indices,
+                        source_band_names=source_band_names,
+                    )
+                    valid = np.isfinite(current)
+                    valid &= current > self.valid_threshold
+                    valid &= current <= self.valid_range[1]
+                    daily_arrays.append(np.where(valid, current, np.nan))
+                    if meta is None:
+                        meta = current_meta
+                    elif (
+                        current.shape != daily_arrays[0].shape
+                        or current_meta["transform"] != meta["transform"]
+                        or current_meta["crs"] != meta["crs"]
+                    ):
+                        raise ValueError(
+                            f"Same-date raster shape mismatch: {tif_path}"
+                        )
+                if len(daily_arrays) == 1:
+                    obs = daily_arrays[0]
+                else:
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings(
+                            "ignore", message="All-NaN slice encountered"
+                        )
+                        obs = np.nanmedian(np.stack(daily_arrays, axis=0), axis=0)
+                obs = np.nan_to_num(obs, nan=0.0).astype(np.float32, copy=False)
+                meta["date"] = date_dt
+                meta["date_str"] = date_dt.strftime("%Y-%m-%d")
+                meta["source_paths"] = [str(path) for path in source_paths]
+                meta["source_file_count"] = len(source_paths)
+                meta["temporal_observation_protocol"] = DAILY_OBSERVATION_PROTOCOL
                 images.append((obs, meta))
             except Exception as e:
-                print(f"[Warning] Failed to load {tif_path}: {e}")
+                print(f"[Warning] Failed to load daily observation {date_dt.date()}: {e}")
         
         print(f"[Preprocessor] Loaded {len(images)} images from {folder_path}")
         

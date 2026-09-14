@@ -46,6 +46,12 @@ class OnboardInference:
         self.band_indices = list(range(self.meta['n_bands']))
         
         print(f"[Inference] Model loaded: {self.meta['n_bands']} bands")
+
+    @staticmethod
+    def _log_variance_to_standard_deviation(log_variance):
+        """Convert the network log-variance output to standard deviation."""
+
+        return torch.exp(0.5 * torch.clamp(log_variance, min=-7.0, max=5.0))
         
     def _create_coords_grid(self, H, W):
         # 确保使用 (idx + 0.5) / size 逻辑
@@ -69,7 +75,7 @@ class OnboardInference:
         
         C = len(self.band_indices)
         mean = np.zeros((H * W, C), dtype=np.float32)
-        std_net = np.zeros((H * W, C), dtype=np.float32) # 新增：用于存储网络预测的标准差
+        std_net = np.zeros((H * W, C), dtype=np.float32)
         
         dmin, dmax = self.meta['data_range']
         use_log = self.meta.get('use_log', False)
@@ -84,13 +90,12 @@ class OnboardInference:
                 t_in = torch.full((n_points, 1), t_norm, device=self.device)
                 out = self.model(coords[i:end], t_in)
                 
-                # 🚀 核心修复：同时提取均值和网络预测的标准差 (pred_std)
                 if isinstance(out, tuple):
                     pred_mean_batch = out[0]
-                    pred_std_batch = out[1] 
+                    pred_std_batch = self._log_variance_to_standard_deviation(out[1])
                 else:
                     pred_mean_batch = out
-                    pred_std_batch = torch.full_like(pred_mean_batch, 0.01) # 极端兜底
+                    pred_std_batch = torch.full_like(pred_mean_batch, 0.01)
                 
                 # 还原反射率尺度 (先反归一化)
                 pred_mean_batch = pred_mean_batch * (dmax - dmin) + dmin
@@ -119,11 +124,15 @@ class OnboardInference:
         """
         通过TIF文件推理
         """
-        import rasterio
-        with rasterio.open(tif_path) as src:
-            H, W = src.height, src.width
-            obs = src.read().transpose(1, 2, 0).astype(np.float32)
-            if np.max(obs) > 10: obs *= 0.0001
+        from common.scene_inference import read_observation
+
+        obs, _, _, _ = read_observation(
+            tif_path,
+            expected_bands=self.meta["n_bands"],
+            source_band_indices=self.meta.get("source_band_indices"),
+            source_band_names=self.meta.get("source_band_names"),
+        )
+        H, W, _ = obs.shape
         
         date_dt = extract_date_from_filename(os.path.basename(tif_path))
         mean, std = self.predict_frame(date_dt, H, W, chunk_size)
@@ -169,6 +178,19 @@ class OnboardInference:
             failures.append("input_quality_screened metadata is absent or false")
         if "last_training_observation_date" not in self.meta:
             failures.append("last_training_observation_date metadata is absent")
+        n_bands = int(self.meta.get("n_bands", 0))
+        source_indices = self.meta.get("source_band_indices")
+        source_names = self.meta.get("source_band_names")
+        if source_indices is not None and len(source_indices) != n_bands:
+            failures.append(
+                f"source_band_indices has {len(source_indices)} entries, expected {n_bands}"
+            )
+        if source_names is not None and len(source_names) != n_bands:
+            failures.append(
+                f"source_band_names has {len(source_names)} entries, expected {n_bands}"
+            )
+        if n_bands == 5 and (source_indices is None or source_names is None):
+            failures.append("five-band models require explicit source-band metadata")
         if failures:
             raise RuntimeError(
                 "This GNDC predates the revised SINC model contract and cannot be "

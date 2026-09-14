@@ -1,6 +1,6 @@
 # SINC
 
-SINC（Spatiotemporal Implicit Neural Continuous monitoring）利用多分辨率哈希编码和谐波时间模型，将历史 Sentinel-2 表面反射率序列压缩为可连续查询的概率基线。该仓库提供模型训练、训练期终端稳定状态的经验零分布校准、单景或批量异常检测，以及一个可直接运行的 Vegetation Fire 示例。
+SINC（Spatiotemporal Implicit Neural Fields for Continuous Land-Surface Monitoring）利用多分辨率哈希编码和谐波时间模型，将历史 Sentinel-2 表面反射率序列表示为可连续查询的概率基线。该仓库提供模型训练、训练期终端稳定状态的经验零分布校准、单景或批量异常检测，以及一个可直接运行的 Vegetation Fire 示例。
 
 ## 方法与实现边界
 
@@ -69,7 +69,7 @@ python -m pip install -e ".[vector]"
 python -m sinc.preflight
 ```
 
-该命令检查 Python 版本、依赖、CUDA、`tiny-cuda-nn`、23 个同步核心文件，以及 107 幅示例影像的 SHA-256。仅检查源码和数据完整性时可执行：
+该命令检查 Python 版本、依赖、CUDA、`tiny-cuda-nn`、五波段示例配置、受清单跟踪的发布文件，以及 107 幅示例影像的 SHA-256 和波段布局。仅检查源码和数据完整性时可执行：
 
 ```powershell
 python -m sinc.preflight --skip-gpu
@@ -90,9 +90,15 @@ data/Vegetation Fire/
 └── DATA_MANIFEST.csv
 ```
 
-每幅影像包含 7 个波段，顺序为 `B2, B3, B4, B5, B8, B11, B12`。影像像元为 Sentinel-2 表面反射率数字量化值，配置中的比例因子 `0.0001` 将其转换为反射率。文件名必须包含 `YYYY-MM-DD` 格式的成像日期。
+示例 GeoTIFF 保留 7 个源波段，顺序为 `B2, B3, B4, B5, B8, B11, B12`。与论文最终实验一致，训练、校准和检测仅选择其中的 `B3, B4, B8, B11, B12`，即 green、red、NIR、SWIR1 和 SWIR2。该映射在 YAML 中以一基索引 `source_band_indices: [2, 3, 5, 6, 7]` 显式声明，并随 GNDC 模型保存，避免推理时误用前五个源波段。
+
+影像像元为 Sentinel-2 表面反射率数字量化值，配置中的比例因子 `0.0001` 将其转换为反射率。仅保留五个波段均位于 `(0, 1]` 的像元。文件名必须包含 `YYYY-MM-DD` 格式的成像日期；同一天存在多幅源影像时，程序先按像元和波段计算 `nanmedian`，再将其作为一个日观测输入模型。
 
 示例包含 106 幅训练影像和 1 幅后续目标影像。目标影像不参与模型训练、经验阈值估计或 alpha 选择。`DATA_MANIFEST.csv` 记录文件名、日期、尺寸、坐标参考和 SHA-256，可用于检查下载或复制后的数据完整性。
+
+### 与论文实验的对应范围
+
+公开示例复现论文采用的五波段 SINC 训练、基于历史观测的经验零分布校准和 Vegetation Fire 单日期检测流程。论文中的七区域汇总、原生 COLD/S-CCD 对比、区域间 alpha 选择和消融实验所需的其他区域影像与人工参考样本未包含在本仓库中，因此本示例不单独复现这些汇总结果。
 
 ## 一键运行
 
@@ -140,7 +146,7 @@ python -m sinc.calibrate `
   --normal-dir "data/Vegetation Fire/train" `
   --output outputs/vegetation_fire/thresholds.json `
   --calibrated-model outputs/vegetation_fire/sinc_calibrated.gndc `
-  --alpha 0.01 `
+  --alpha 0.005 `
   --device cuda
 ```
 
@@ -153,7 +159,7 @@ python -m sinc.calibrate `
 - 使用经验联合正常分数的上尾概率确定最终区域阈值；
 - 保存阈值 JSON、嵌入阈值的 GNDC 和独立审计 JSON。
 
-`alpha=0.01` 表示经验联合正常分数的 1% 上尾概率，不是根据目标扰动影像的 F1 分数反向选择的阈值。日期质量控制不按残差大小删除难例。
+`alpha=0.005` 表示经验联合正常分数的 0.5% 上尾概率。该值是论文在七区域 threshold-validation observations 上选择的共同工作点；公开单区域示例直接使用该值，并不在目标扰动影像上重新选择 alpha。日期质量控制不按残差大小删除难例。
 
 ### 3. 检测目标影像
 
@@ -169,6 +175,8 @@ python -m sinc.detect `
 也可以将 `--input` 指向包含多幅待检测 GeoTIFF 的目录。检测程序根据每幅影像文件名中的日期查询对应的预测均值和不确定性，再应用 GNDC 中锁定的经验零分布配置。
 
 归一化联合分数大于 1 与上述二值判定式严格等价。默认不执行形态学后处理，因此输出掩膜与判定规则逐像元一致。部署任务确需清理小斑块时，可显式增加 `--apply-morphology`，并将其记录为判定后的独立处理。增加 `--export-vector` 可输出矢量结果。
+
+由于五波段流程不包含 B2（blue），检测结果中的三通道浏览底图使用 NIR-red-green 组合，仅用于定位异常，不应解释为真彩色影像。
 
 ## 外推验证示例
 
@@ -215,7 +223,13 @@ sinc-check
 
 ## 代码与数据完整性
 
-`SOURCE_SYNC_MANIFEST.json` 保存从完整实验工程同步到公开仓库的 23 个核心文件 SHA-256。`python -m sinc.preflight` 会验证公开副本未被意外修改。示例影像的校验信息保存在 `data/Vegetation Fire/DATA_MANIFEST.csv`。
+`SOURCE_SYNC_MANIFEST.json` 保存公开发布版本中代码、配置、示例入口和测试文件的 SHA-256。`python -m sinc.preflight` 会验证这些文件未被意外修改。示例影像的校验信息保存在 `data/Vegetation Fire/DATA_MANIFEST.csv`。
+
+源码或配置发生有意更新时，应重新生成源码清单：
+
+```powershell
+python scripts/build_source_manifest.py
+```
 
 若示例数据发生有意更新，应重新生成数据清单：
 
@@ -230,4 +244,3 @@ python scripts/build_data_manifest.py
 - 保存上游质量掩膜规则及输入影像清单。
 - 不要混用旧 GNDC、旧固定阈值或旧检测结果。
 - GPU 架构、CUDA 扩展版本和浮点精度可能带来很小的数值差异。
-

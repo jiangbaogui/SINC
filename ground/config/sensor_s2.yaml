@@ -9,14 +9,16 @@ paths:
 
 data:
   dataset_mode: "standard"
-  n_bands: 7
+  n_bands: 5
+  source_band_indices: [2, 3, 5, 6, 7]
+  source_band_names: [B3, B4, B8, B11, B12]
   global_start_date: "2018-01-01"
   global_end_date: "2020-12-31"
   temporal_buffer_days: 0
   input_quality_screened: true
   quality_mask_description: "Cloud, cloud-shadow, snow, and invalid observations were removed during upstream preprocessing."
   data_scale: 0.0001
-  input_valid_range: [0.0, 1.2]
+  input_valid_range: [0.0, 1.0]
   input_p99_removal: false
   temporal_bin_days: null
 
@@ -29,7 +31,7 @@ train:
   n_harmonics: 3
   lambda_reg: 0.0005
   lambda_dynamic_magnitude: 0.0005
-  valid_threshold: 0.001
+  valid_threshold: 0.0
   xy_hash_size: 16
   t_hash_size: 16
   n_levels: 12

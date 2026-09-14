@@ -12,7 +12,16 @@ import gc
 from tqdm import tqdm
 import atexit
 
-from .NDCUtils import extract_date_from_filename, normalize_time
+from common.constants import (
+    DAILY_OBSERVATION_PROTOCOL,
+    DEFAULT_VALID_RANGE,
+    VALID_THRESHOLD,
+)
+from .NDCUtils import (
+    extract_date_from_filename,
+    group_dated_paths_by_day,
+    normalize_time,
+)
 
 
 class DatasetLoader:
@@ -40,10 +49,12 @@ class DatasetLoader:
         self,
         folder_path: str,
         expected_bands: int = 1,
+        source_band_indices: Optional[List[int]] = None,
+        source_band_names: Optional[List[str]] = None,
         scale_factor: float = 0.1,
         valid_range: Optional[Tuple[float, float]] = None,
         p99_removal: bool = False,
-        valid_threshold: float = 0.01,
+        valid_threshold: float = VALID_THRESHOLD,
         temporal_bin_days: Optional[int] = None,
         roi_window: Optional[Tuple[int, int, int, int]] = None,
         global_start_date: Optional[datetime] = None,
@@ -51,6 +62,28 @@ class DatasetLoader:
     ) -> Tuple[np.ndarray, np.ndarray, dict]:
         
         meta_info = {}
+        selected_indices = (
+            list(range(1, expected_bands + 1))
+            if source_band_indices is None
+            else [int(value) for value in source_band_indices]
+        )
+        if len(selected_indices) != expected_bands:
+            raise ValueError(
+                "source_band_indices must contain exactly expected_bands entries"
+            )
+        if any(value < 1 for value in selected_indices):
+            raise ValueError("source_band_indices must use one-based positive indices")
+        if len(set(selected_indices)) != len(selected_indices):
+            raise ValueError("source_band_indices cannot contain duplicates")
+        selected_names = (
+            None
+            if source_band_names is None
+            else [str(value) for value in source_band_names]
+        )
+        if selected_names is not None and len(selected_names) != expected_bands:
+            raise ValueError(
+                "source_band_names must contain exactly expected_bands entries"
+            )
         tif_files = glob.glob(os.path.join(folder_path, "**", "*.tif"), recursive=True)
         raw_valid_files = []
         
@@ -67,11 +100,49 @@ class DatasetLoader:
         
         if temporal_bin_days:
             processed_list = self._temporal_binning(raw_valid_files, temporal_bin_days)
+            temporal_protocol = (
+                f"{temporal_bin_days}_day_nanmedian_reflectance_gt0_le1_v1"
+            )
         else:
-            processed_list = [{"date": f["date"], "files": [f]} for f in raw_valid_files]
+            daily_groups = group_dated_paths_by_day(
+                (item["path"] for item in raw_valid_files),
+                start=global_start_date,
+                end=global_end_date,
+            )
+            processed_list = [
+                {
+                    "date": date,
+                    "files": [{"date": date, "path": str(path)} for path in paths],
+                }
+                for date, paths in daily_groups
+            ]
+            temporal_protocol = DAILY_OBSERVATION_PROTOCOL
+
+        meta_info["source_file_count"] = len(raw_valid_files)
+        meta_info["temporal_observation_count"] = len(processed_list)
+        meta_info["same_day_composite_count"] = sum(
+            len(item["files"]) > 1 for item in processed_list
+        )
+        meta_info["temporal_observation_protocol"] = temporal_protocol
+        meta_info["input_reflectance_valid_range"] = [
+            float(valid_threshold),
+            float(valid_range[1] if valid_range else DEFAULT_VALID_RANGE[1]),
+        ]
         
         first_tif = raw_valid_files[0]["path"]
         with rasterio.open(first_tif) as src:
+            if max(selected_indices) > src.count:
+                raise ValueError(
+                    f"Requested source band {max(selected_indices)} but {first_tif} "
+                    f"contains only {src.count} bands"
+                )
+            if selected_names and any(src.descriptions):
+                actual_names = [src.descriptions[index - 1] for index in selected_indices]
+                if actual_names != selected_names:
+                    raise ValueError(
+                        f"Configured source bands {selected_names} do not match "
+                        f"GeoTIFF descriptions {actual_names} in {first_tif}"
+                    )
             if roi_window:
                 col_off, row_off, w, h = roi_window
                 meta_info['width'], meta_info['height'] = w, h
@@ -82,6 +153,9 @@ class DatasetLoader:
             
             meta_info['crs'] = src.crs.to_wkt() if src.crs else ""
             meta_info['n_bands'] = expected_bands
+            meta_info['source_band_indices'] = selected_indices
+            if selected_names is not None:
+                meta_info['source_band_names'] = selected_names
         
         N = len(processed_list)
         H, W, C = meta_info['height'], meta_info['width'], expected_bands
@@ -109,13 +183,27 @@ class DatasetLoader:
             bin_data_list = []
             for f_info in bin_info["files"]:
                 with rasterio.open(f_info["path"]) as src:
+                    if max(selected_indices) > src.count:
+                        raise ValueError(
+                            f"Requested source band {max(selected_indices)} but "
+                            f"{f_info['path']} contains only {src.count} bands"
+                        )
+                    if selected_names and any(src.descriptions):
+                        actual_names = [
+                            src.descriptions[index - 1] for index in selected_indices
+                        ]
+                        if actual_names != selected_names:
+                            raise ValueError(
+                                f"Configured source bands {selected_names} do not match "
+                                f"GeoTIFF descriptions {actual_names} in {f_info['path']}"
+                            )
                     read_win = Window(*roi_window) if roi_window else None
-                    data = src.read(indexes=list(range(1, C + 1)), window=read_win)
+                    data = src.read(indexes=selected_indices, window=read_win)
                     data = data.transpose(1, 2, 0).astype(np.float32)
                     
                     data *= scale_factor
-                    if valid_threshold:
-                        data[data < valid_threshold] = np.nan
+                    if valid_threshold is not None:
+                        data[data <= valid_threshold] = np.nan
                     if valid_range:
                         data[(data < valid_range[0]) | (data > valid_range[1])] = np.nan
                     
@@ -204,20 +292,26 @@ class DatasetLoader:
 def load_dataset(
     folder_path: str,
     expected_bands: int = 7,
+    source_band_indices: Optional[List[int]] = None,
+    source_band_names: Optional[List[str]] = None,
     scale_factor: float = 0.0001,
-    valid_range: Tuple[float, float] = (0, 1.2),
+    valid_range: Tuple[float, float] = DEFAULT_VALID_RANGE,
     global_start_date: Optional[datetime] = None,
     global_end_date: Optional[datetime] = None,
-    temporal_bin_days: Optional[int] = None
+    temporal_bin_days: Optional[int] = None,
+    valid_threshold: float = VALID_THRESHOLD,
 ) -> Tuple[np.ndarray, np.ndarray, dict]:
     """便捷函数：加载数据集"""
     loader = DatasetLoader()
     return loader.load_folder(
         folder_path=folder_path,
         expected_bands=expected_bands,
+        source_band_indices=source_band_indices,
+        source_band_names=source_band_names,
         scale_factor=scale_factor,
         valid_range=valid_range,
         global_start_date=global_start_date,
         global_end_date=global_end_date,
-        temporal_bin_days=temporal_bin_days
+        temporal_bin_days=temporal_bin_days,
+        valid_threshold=valid_threshold,
     )

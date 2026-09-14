@@ -47,13 +47,39 @@ class NDCConfig:
     def _parse_data(self):
         data = self._cfg.get('data', {})
         self.dataset_mode = data.get('dataset_mode', 'standard')
-        self.n_bands = data.get('n_bands', 1)
+        self.n_bands = int(data.get('n_bands', 1))
+        configured_band_indices = data.get('source_band_indices')
+        if configured_band_indices is None:
+            self.source_band_indices = None
+        else:
+            self.source_band_indices = [int(value) for value in configured_band_indices]
+            if len(self.source_band_indices) != self.n_bands:
+                raise ValueError(
+                    "data.source_band_indices must contain exactly data.n_bands "
+                    "one-based GeoTIFF band indices."
+                )
+            if any(value < 1 for value in self.source_band_indices):
+                raise ValueError(
+                    "data.source_band_indices must be one-based positive integers."
+                )
+            if len(set(self.source_band_indices)) != len(self.source_band_indices):
+                raise ValueError("data.source_band_indices cannot contain duplicates.")
+
+        configured_band_names = data.get('source_band_names')
+        if configured_band_names is None:
+            self.source_band_names = None
+        else:
+            self.source_band_names = [str(value) for value in configured_band_names]
+            if len(self.source_band_names) != self.n_bands:
+                raise ValueError(
+                    "data.source_band_names must contain exactly data.n_bands names."
+                )
         
         self.global_start_date = self._parse_date(data.get('global_start_date'))
         self.global_end_date = self._parse_date(data.get('global_end_date'))
         
         self.data_scale = data.get('data_scale', 1.0)
-        self.input_valid_range = data.get('input_valid_range', [-1, 1])
+        self.input_valid_range = data.get('input_valid_range', [0.0, 1.0])
         self.input_p99_removal = data.get('input_p99_removal', False)
         self.temporal_bin_days = data.get('temporal_bin_days', None)
         # The temporal domain ends at the final observed training acquisition.
@@ -92,7 +118,7 @@ class NDCConfig:
         self.lambda_dynamic_magnitude = train.get(
             'lambda_dynamic_magnitude', self.lambda_reg
         )
-        self.valid_threshold = train.get('valid_threshold', 0.01)
+        self.valid_threshold = train.get('valid_threshold', 0.0)
         
         self.xy_hash_size = train.get('xy_hash_size', 19)
         self.t_hash_size = train.get('t_hash_size', 17)

@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Mapping
 
 import numpy as np
+
+from common.constants import DEFAULT_VALID_RANGE, VALID_THRESHOLD
 from scipy.ndimage import convolve as scipy_convolve
 
 
@@ -119,9 +121,12 @@ def valid_observation_mask(observation: np.ndarray) -> np.ndarray:
 
     observation = np.asarray(observation)
     finite = np.all(np.isfinite(observation), axis=-1)
-    nonzero = ~np.all(observation == 0, axis=-1)
-    in_range = np.all((observation >= 0.0) & (observation <= 1.2), axis=-1)
-    return finite & nonzero & in_range
+    in_range = np.all(
+        (observation > VALID_THRESHOLD)
+        & (observation <= DEFAULT_VALID_RANGE[1]),
+        axis=-1,
+    )
+    return finite & in_range
 
 
 def calculate_detection_maps(

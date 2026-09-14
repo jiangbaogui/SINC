@@ -11,7 +11,7 @@ import torch
 
 from ground.core.NDCCompressor import NDCCompressor
 from ground.core.NDCConfig import NDCConfig
-from ground.core.NDCUtils import extract_date_from_filename
+from ground.core.NDCUtils import group_dated_paths_by_day
 
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -20,29 +20,31 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 def _training_temporal_domain(cfg):
     """Return the first and final observed acquisitions in the training range."""
 
-    dated_files = []
-    for path in Path(cfg.input_folder).rglob("*.tif"):
-        acquisition = extract_date_from_filename(path.name)
-        if acquisition is None:
-            continue
-        if cfg.global_start_date and acquisition.date() < cfg.global_start_date.date():
-            continue
-        if cfg.global_end_date and acquisition.date() > cfg.global_end_date.date():
-            continue
-        dated_files.append((acquisition, path))
-    if not dated_files:
+    dated_groups = group_dated_paths_by_day(Path(cfg.input_folder).rglob("*.tif"))
+    dated_groups = [
+        (acquisition, paths)
+        for acquisition, paths in dated_groups
+        if not (
+            cfg.global_start_date
+            and acquisition.date() < cfg.global_start_date.date()
+        )
+        and not (
+            cfg.global_end_date
+            and acquisition.date() > cfg.global_end_date.date()
+        )
+    ]
+    if not dated_groups:
         raise ValueError(
             "No dated training images fall inside the configured temporal range."
         )
 
-    dated_files.sort(key=lambda item: item[0])
-    start = dated_files[0][0]
-    end = dated_files[-1][0]
+    start = dated_groups[0][0]
+    end = dated_groups[-1][0]
     if end <= start:
         raise ValueError(
             f"The final training acquisition ({end}) must be after the start ({start})."
         )
-    return start, end, dated_files
+    return start, end, dated_groups
 
 
 def train(config_path: str, output_model_path: str | None = None):
@@ -81,12 +83,14 @@ def train(config_path: str, output_model_path: str | None = None):
         print(f"Error: Input folder not found: {cfg.input_folder}")
         sys.exit(1)
 
-    temporal_start, final_observation_date, dated_files = _training_temporal_domain(cfg)
+    temporal_start, final_observation_date, dated_groups = _training_temporal_domain(cfg)
+    source_file_count = sum(len(paths) for _, paths in dated_groups)
     print("=== GeoNDC Pipeline Start ===")
     print(
         "Temporal domain: "
         f"{temporal_start.isoformat()} to {final_observation_date.isoformat()} "
-        f"({len(dated_files)} dated input files; no extrapolation buffer)"
+        f"({len(dated_groups)} daily observations from {source_file_count} source "
+        "files; same-date nanmedian compositing; no extrapolation buffer)"
     )
 
     comp = NDCCompressor(
@@ -102,10 +106,13 @@ def train(config_path: str, output_model_path: str | None = None):
     comp.load_dataset_folder(
         folder_path=cfg.input_folder,
         expected_bands=cfg.n_bands,
+        source_band_indices=cfg.source_band_indices,
+        source_band_names=cfg.source_band_names,
         scale_factor=cfg.data_scale,
         valid_range=cfg.input_valid_range,
         p99_removal=cfg.input_p99_removal,
         temporal_bin_days=cfg.temporal_bin_days,
+        valid_threshold=cfg.valid_threshold,
     )
     comp.meta_info["last_training_observation_date"] = (
         final_observation_date.isoformat()

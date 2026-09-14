@@ -2,28 +2,129 @@
 
 from __future__ import annotations
 
+import warnings
 from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 import rasterio
 import torch
 
+from common.constants import DEFAULT_VALID_RANGE, VALID_THRESHOLD
 from ground.core.NDCUtils import normalize_time
 
 
-def read_observation(path, expected_bands=None):
+def read_observation(
+    path,
+    expected_bands=None,
+    source_band_indices=None,
+    source_band_names=None,
+):
     """Read one reflectance cube and return its spatial metadata."""
 
     with rasterio.open(path) as source:
-        observation = source.read().transpose(1, 2, 0).astype(np.float32)
+        selected_indices = (
+            list(range(1, source.count + 1))
+            if source_band_indices is None
+            else [int(value) for value in source_band_indices]
+        )
+        if expected_bands is not None and len(selected_indices) != expected_bands:
+            if source_band_indices is None:
+                raise ValueError(
+                    f"Raster contains {source.count} bands but the model expects "
+                    f"{expected_bands}; provide an explicit source_band_indices mapping"
+                )
+            raise ValueError(
+                f"Expected {expected_bands} selected bands, got "
+                f"{len(selected_indices)}"
+            )
+        if not selected_indices or min(selected_indices) < 1:
+            raise ValueError("source_band_indices must be one-based positive integers")
+        if max(selected_indices) > source.count:
+            raise ValueError(
+                f"Requested source band {max(selected_indices)} but {path} contains "
+                f"only {source.count} bands"
+            )
+        if source_band_names and any(source.descriptions):
+            actual_names = [source.descriptions[index - 1] for index in selected_indices]
+            if actual_names != list(source_band_names):
+                raise ValueError(
+                    f"Configured source bands {list(source_band_names)} do not match "
+                    f"GeoTIFF descriptions {actual_names} in {path}"
+                )
+        observation = (
+            source.read(indexes=selected_indices)
+            .transpose(1, 2, 0)
+            .astype(np.float32)
+        )
         profile = source.profile.copy()
+        profile["count"] = len(selected_indices)
         transform = source.transform
         crs = source.crs
-    if np.nanmax(observation) > 10:
+    finite = observation[np.isfinite(observation)]
+    if finite.size and float(np.max(finite)) > 10.0:
         observation *= 0.0001
-    if expected_bands is not None:
-        observation = observation[..., :expected_bands]
     return observation, profile, transform, crs
+
+
+def read_observation_group(
+    paths,
+    expected_bands=None,
+    source_band_indices=None,
+    source_band_names=None,
+):
+    """Read one daily observation, compositing same-date rasters by nanmedian."""
+
+    if isinstance(paths, (str, Path)):
+        paths = (Path(paths),)
+    else:
+        paths = tuple(Path(path) for path in paths)
+    if not paths:
+        raise ValueError("At least one raster is required for a daily observation")
+
+    arrays = []
+    reference_profile = None
+    reference_transform = None
+    reference_crs = None
+    for path in paths:
+        observation, profile, transform, crs = read_observation(
+            path,
+            expected_bands=expected_bands,
+            source_band_indices=source_band_indices,
+            source_band_names=source_band_names,
+        )
+        if reference_profile is None:
+            reference_profile = profile
+            reference_transform = transform
+            reference_crs = crs
+        else:
+            aligned = (
+                observation.shape == arrays[0].shape
+                and profile["height"] == reference_profile["height"]
+                and profile["width"] == reference_profile["width"]
+                and transform.almost_equals(reference_transform)
+                and crs == reference_crs
+            )
+            if not aligned:
+                raise ValueError(f"Same-date raster is not aligned with {paths[0]}: {path}")
+
+        valid = np.isfinite(observation)
+        valid &= observation > VALID_THRESHOLD
+        valid &= observation <= DEFAULT_VALID_RANGE[1]
+        arrays.append(np.where(valid, observation, np.nan))
+
+    if len(arrays) == 1:
+        composite = arrays[0]
+    else:
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="All-NaN slice encountered")
+            composite = np.nanmedian(np.stack(arrays, axis=0), axis=0)
+    return (
+        composite.astype(np.float32, copy=False),
+        reference_profile,
+        reference_transform,
+        reference_crs,
+    )
 
 
 def _metadata_datetime(value):

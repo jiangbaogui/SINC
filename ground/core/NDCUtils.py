@@ -4,7 +4,8 @@
 import re
 import math
 from datetime import datetime, timedelta, date as date_type
-from typing import Optional
+from pathlib import Path
+from typing import Iterable, Optional
 
 try:
     import zstandard as zstd
@@ -69,6 +70,36 @@ def extract_date_from_filename(
             pass  # 如果提取到的 8 位数字不是合法日期 (比如月份是 99)，则忽略并返回 None
 
     return None
+
+
+def group_dated_paths_by_day(
+    paths: Iterable[str | Path],
+    *,
+    start: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+    end_exclusive: Optional[datetime] = None,
+) -> list[tuple[datetime, tuple[Path, ...]]]:
+    """Group dated raster paths into deterministic acquisition-day observations."""
+
+    grouped: dict[date_type, dict[str, object]] = {}
+    for raw_path in sorted((Path(path) for path in paths), key=lambda path: str(path)):
+        acquisition = extract_date_from_filename(raw_path.name)
+        if acquisition is None:
+            continue
+        if start is not None and acquisition < start:
+            continue
+        if end is not None and acquisition > end:
+            continue
+        if end_exclusive is not None and acquisition >= end_exclusive:
+            continue
+        day = acquisition.date()
+        entry = grouped.setdefault(day, {"date": acquisition, "paths": []})
+        entry["paths"].append(raw_path)
+
+    return [
+        (entry["date"], tuple(entry["paths"]))
+        for _, entry in sorted(grouped.items(), key=lambda item: item[0])
+    ]
 
 
 def normalize_time(

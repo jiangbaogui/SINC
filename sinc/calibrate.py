@@ -18,7 +18,7 @@ from experiments.adaptive_detection.empirical_null_calibration import (
     filter_stable_reference_frames,
     fit_thresholds,
 )
-from common.scene_inference import predict_frame_with_state, read_observation
+from common.scene_inference import predict_frame_with_state, read_observation_group
 from ground.core.GNDCProfile import embed_empirical_null_profile
 from onboard.core.anomaly_detector import AnomalyDetector
 from onboard.core.onboard_inference import OnboardInference
@@ -57,6 +57,17 @@ def calibrate(
     if len(references) < 4:
         raise RuntimeError("At least four dated GNDC training images are required")
 
+    source_band_indices = inference.meta.get("source_band_indices")
+    source_band_names = inference.meta.get("source_band_names")
+
+    def observation_reader(path, expected_bands=None):
+        return read_observation_group(
+            path,
+            expected_bands=expected_bands,
+            source_band_indices=source_band_indices,
+            source_band_names=source_band_names,
+        )
+
     def predictor(date, _path, observation):
         height, width, _ = observation.shape
         mean, std, state, velocity = predict_frame_with_state(
@@ -70,7 +81,7 @@ def calibrate(
         references,
         predictor,
         detector,
-        read_observation,
+        observation_reader,
         expected_bands=len(inference.band_indices),
         random_seed=int(seed),
     )

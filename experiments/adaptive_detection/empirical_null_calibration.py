@@ -8,7 +8,7 @@ from typing import Callable, Iterable
 
 import numpy as np
 
-from ground.core.NDCUtils import extract_date_from_filename
+from ground.core.NDCUtils import group_dated_paths_by_day
 from onboard.core.empirical_null import (
     DEFAULT_NULL_TRIM_ALPHA,
     DEFAULT_REFERENCE_QUANTILE,
@@ -48,20 +48,20 @@ DEFAULT_MINIMUM_STATE_CHANGE = 1e-4
 def dated_images_before(
     directory: str | Path,
     target_date: datetime,
-) -> list[tuple[datetime, Path]]:
-    """Return one raster per acquisition date strictly before the target date."""
+) -> list[tuple[datetime, tuple[Path, ...]]]:
+    """Return all source rasters grouped into pre-target daily observations."""
 
-    by_date: dict = {}
-    for path in sorted(Path(directory).rglob("*.tif")):
-        date = extract_date_from_filename(path.name)
-        if date is not None and date < target_date:
-            by_date.setdefault(date.date(), (date, path))
-    return sorted(by_date.values(), key=lambda item: item[0])
+    return group_dated_paths_by_day(
+        Path(directory).rglob("*.tif"), end_exclusive=target_date
+    )
 
 
 def split_calibration_validation_frames(
-    images: Iterable[tuple[datetime, Path]],
-) -> tuple[list[tuple[datetime, Path]], list[tuple[datetime, Path]]]:
+    images: Iterable[tuple[datetime, tuple[Path, ...]]],
+) -> tuple[
+    list[tuple[datetime, tuple[Path, ...]]],
+    list[tuple[datetime, tuple[Path, ...]]],
+]:
     """Create deterministic, temporally interleaved normal calibration/validation sets."""
 
     images = list(images)
@@ -133,7 +133,7 @@ def filter_stable_reference_frames(
 
 
 def collect_frame_distributions(
-    images: Iterable[tuple[datetime, Path]],
+    images: Iterable[tuple[datetime, tuple[Path, ...]]],
     predictor: Callable,
     detector,
     read_observation: Callable,
@@ -146,7 +146,7 @@ def collect_frame_distributions(
 ) -> tuple[list[dict], list[dict]]:
     """Predict reference dates and retain sampled plus per-frame score distributions.
 
-    The predictor receives ``(date, path, observation)`` and returns
+    The predictor receives ``(date, primary_path, observation)`` and returns
     ``(predicted_mean, predicted_std, state_information, diagnostics)``.
     ``state_information`` should contain the band-specific ``state`` correction
     and may contain its local ``velocity``. A legacy numeric dynamic map remains
@@ -156,10 +156,20 @@ def collect_frame_distributions(
     rng = np.random.default_rng(random_seed)
     frames = []
     records = []
-    for frame_index, (date, path) in enumerate(images, start=1):
-        observation, _, _, _ = read_observation(path, expected_bands=expected_bands)
+    for frame_index, (date, paths) in enumerate(images, start=1):
+        source_paths = (
+            (Path(paths),)
+            if isinstance(paths, (str, Path))
+            else tuple(Path(path) for path in paths)
+        )
+        if not source_paths:
+            raise ValueError(f"No source rasters are available for {date.date()}")
+        primary_path = source_paths[0]
+        observation, _, _, _ = read_observation(
+            source_paths, expected_bands=expected_bands
+        )
         predicted_mean, predicted_std, state_information, diagnostics = predictor(
-            date, path, observation
+            date, primary_path, observation
         )
         d2, cfar, sam, valid = calculate_detection_maps(
             observation, predicted_mean, predicted_std, detector
@@ -192,11 +202,16 @@ def collect_frame_distributions(
         valid_indices = np.flatnonzero(valid.ravel())
         if valid_indices.size < 100:
             if not skip_frames_with_too_few_valid:
-                raise RuntimeError(f"Too few valid calibration pixels in {path}")
+                raise RuntimeError(
+                    f"Too few valid calibration pixels in daily observation "
+                    f"{date.date()}"
+                )
             records.append(
                 {
                     "date": date.isoformat(),
-                    "image": str(path),
+                    "image": str(primary_path),
+                    "source_images": [str(path) for path in source_paths],
+                    "source_file_count": len(source_paths),
                     "valid_pixel_count": int(valid_indices.size),
                     "sample_count": 0,
                     "valid_fraction": float(np.mean(valid)),
@@ -205,7 +220,7 @@ def collect_frame_distributions(
                 }
             )
             print(
-                f"  Skipped normal reference {frame_index:02d}: {path.name} "
+                f"  Skipped normal reference {frame_index:02d}: {date.date()} "
                 f"({valid_indices.size} valid model predictions)"
             )
             continue
@@ -225,7 +240,8 @@ def collect_frame_distributions(
         frames.append(
             {
                 "date": date,
-                "path": path,
+                "path": primary_path,
+                "source_paths": source_paths,
                 "d2": d2,
                 "cfar": cfar,
                 "sam": sam,
@@ -243,7 +259,9 @@ def collect_frame_distributions(
         records.append(
             {
                 "date": date.isoformat(),
-                "image": str(path),
+                "image": str(primary_path),
+                "source_images": [str(path) for path in source_paths],
+                "source_file_count": len(source_paths),
                 "valid_pixel_count": int(np.count_nonzero(valid)),
                 "sample_count": int(valid_indices.size),
                 "valid_fraction": float(np.mean(valid)),
@@ -257,7 +275,7 @@ def collect_frame_distributions(
             }
         )
         print(
-            f"  Normal reference {frame_index:02d}: {path.name} "
+            f"  Normal reference {frame_index:02d}: {date.date()} "
             f"({valid_indices.size} sampled pixels)"
         )
     return frames, records

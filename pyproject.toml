@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sinc-remote-sensing"
 version = "0.1.0"
-description = "Spatiotemporal Implicit Neural Continuous monitoring for Sentinel-2 time series"
+description = "Spatiotemporal Implicit Neural Fields for Continuous Land-Surface Monitoring"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

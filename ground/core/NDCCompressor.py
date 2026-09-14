@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Mapping, Optional
 from tqdm import tqdm
 
+from common.constants import DEFAULT_VALID_RANGE, VALID_THRESHOLD
 from .NDCCCDCNetwork import GeoCCDCNetwork
 from .NDCUtils import fast_compress, fast_decompress
 from .NDCDatasetLoader import DatasetLoader
@@ -77,19 +78,25 @@ class NDCCompressor:
         self,
         folder_path: str,
         expected_bands: int = 7,
+        source_band_indices: Optional[list[int]] = None,
+        source_band_names: Optional[list[str]] = None,
         scale_factor: float = 0.0001,
-        valid_range: tuple = (0, 1.2),
+        valid_range: tuple = DEFAULT_VALID_RANGE,
         p99_removal: bool = False,
-        temporal_bin_days: Optional[int] = None
+        temporal_bin_days: Optional[int] = None,
+        valid_threshold: float = VALID_THRESHOLD,
     ):
         """加载数据集"""
         print(f"[NDC] Loading dataset from: {folder_path}")
         self.volume, self.nodata_mask_vol, loaded_meta = self.loader.load_folder(
             folder_path=folder_path,
             expected_bands=expected_bands,
+            source_band_indices=source_band_indices,
+            source_band_names=source_band_names,
             scale_factor=scale_factor,
             valid_range=valid_range,
             p99_removal=p99_removal,
+            valid_threshold=valid_threshold,
             temporal_bin_days=temporal_bin_days,
             global_start_date=self.global_start_date,
             global_end_date=self.global_end_date
@@ -98,7 +105,9 @@ class NDCCompressor:
         return self.volume, self.nodata_mask_vol
     
     # [修改点 1]：引入 valid_threshold 参数，替换硬编码
-    def prepare_training_data_optimized(self, use_log: bool = False, valid_threshold: float = 0.001):
+    def prepare_training_data_optimized(
+        self, use_log: bool = False, valid_threshold: float = VALID_THRESHOLD
+    ):
         """准备训练数据"""
         print(f"[Optimized] Preparing Coordinate Grid & Filtering Noise...")
         N, H, W, C = self.volume.shape
