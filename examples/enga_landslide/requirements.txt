@@ -1,0 +1,6 @@
+numpy
+pandas
+rasterio
+scipy
+scikit-learn
+zstandard

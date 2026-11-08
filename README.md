@@ -1,5 +1,7 @@
 # SINC
 
+当前稿件的 HSTB-IR 滑坡案例见 [Enga landslide example](examples/enga_landslide/README.md)。该案例提供已拟合的反射率基线、历史校准参数和目标影像，可复现目标日期的基线生成与扰动筛查。
+
 SINC（Spatiotemporal Implicit Neural Fields for Continuous Land-Surface Monitoring）利用多分辨率哈希编码和谐波时间模型，将历史 Sentinel-2 表面反射率序列表示为可连续查询的概率基线。该仓库提供模型训练、训练期终端稳定状态的经验零分布校准、单景或批量异常检测，以及一个可直接运行的 Vegetation Fire 示例。
 
 ## 方法与实现边界
